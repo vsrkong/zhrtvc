@@ -11,7 +11,7 @@ import sys
 import re
 import time
 from synthesizer import audio, hparams
-from tools import find_start_end_points
+from tools.spec_processor import find_start_end_points
 from .sentence import xinqing_texts
 
 # Use this directory structure for your datasets, or modify it to fit your needs
@@ -24,21 +24,6 @@ recognized_datasets = [
     r"record",
     r"librispeech\LibriSpeech\test-clean\LibriSpeech\test-clean",
 ]
-
-_out_dir = Path('toolbox/saved_files')
-_out_dir.mkdir(exist_ok=True)
-
-_out_mel_dir = _out_dir.joinpath('mels')
-_out_mel_dir.mkdir(exist_ok=True)
-
-_out_wav_dir = _out_dir.joinpath('wavs')
-_out_wav_dir.mkdir(exist_ok=True)
-
-_out_embed_dir = _out_dir.joinpath('embeds')
-_out_embed_dir.mkdir(exist_ok=True)
-
-_out_record_dir = _out_dir.joinpath('records')
-_out_record_dir.mkdir(exist_ok=True)
 
 filename_formatter_re = re.compile(r'[\s\\/:*?"<>|\']+')
 filename_formatter = lambda x: filename_formatter_re.sub('_', x)[:100]
@@ -59,8 +44,12 @@ total_texts = xinqing_texts
 
 
 class Toolbox:
-    def __init__(self, datasets_root, enc_models_dir, syn_models_dir, voc_models_dir, low_mem):
+    def __init__(self, datasets_root, enc_models_dir, syn_models_dir, voc_models_dir, toolbox_files_dir, low_mem):
         sys.excepthook = self.excepthook
+
+        self._out_dir = Path(toolbox_files_dir)
+        self.make_out_dirs()
+
         self.datasets_root = datasets_root
         self.low_mem = low_mem
         self.utterances = set()
@@ -73,6 +62,21 @@ class Toolbox:
         self.reset_ui(enc_models_dir, syn_models_dir, voc_models_dir)
         self.setup_events()
         self.ui.start()
+
+    def make_out_dirs(self):
+        self._out_dir.mkdir(exist_ok=True)
+
+        self._out_mel_dir = self._out_dir.joinpath('mels')
+        self._out_mel_dir.mkdir(exist_ok=True)
+
+        self._out_wav_dir = self._out_dir.joinpath('wavs')
+        self._out_wav_dir.mkdir(exist_ok=True)
+
+        self._out_embed_dir = self._out_dir.joinpath('embeds')
+        self._out_embed_dir.mkdir(exist_ok=True)
+
+        self._out_record_dir = self._out_dir.joinpath('records')
+        self._out_record_dir.mkdir(exist_ok=True)
 
     def excepthook(self, exc_type, exc_value, exc_tb):
         traceback.print_exception(exc_type, exc_value, exc_tb)
@@ -160,7 +164,7 @@ class Toolbox:
 
         speaker_name = "user01"
         name = speaker_name + "_rec_%d" % int(time.time())
-        audio.save_wav(wav, _out_record_dir.joinpath(name + '.wav'), encoder.sampling_rate)  # save
+        audio.save_wav(wav, self._out_record_dir.joinpath(name + '.wav'), encoder.sampling_rate)  # save
 
         self.add_real_utterance(wav, name, speaker_name)
 
@@ -175,7 +179,7 @@ class Toolbox:
         encoder_wav = encoder.preprocess_wav(wav)
         embed, partial_embeds, _ = encoder.embed_utterance(encoder_wav, return_partials=True)
 
-        np.save(_out_embed_dir.joinpath(name + '.npy'), embed, allow_pickle=False)  # save
+        np.save(self._out_embed_dir.joinpath(name + '.npy'), embed, allow_pickle=False)  # save
 
         # Add the utterance
         utterance = Utterance(name, speaker_name, wav, spec, embed, partial_embeds, False)
@@ -221,7 +225,7 @@ class Toolbox:
         ftext = '。'.join(texts)
         ftime = '{}'.format(int(time.time()))
         fname = filename_formatter('{}_{}_{}zi_{}.npy'.format(fref, ftime, len(ftext), ftext))
-        np.save(_out_mel_dir.joinpath(fname), spec, allow_pickle=False)  # save
+        np.save(self._out_mel_dir.joinpath(fname), spec, allow_pickle=False)  # save
 
         self.ui.draw_spec(spec, "generated")
         self.current_generated = (self.ui.selected_utterance.speaker_name, spec, breaks, None)
@@ -267,7 +271,7 @@ class Toolbox:
         ftext = self.ui.text_prompt.toPlainText()
         fms = int(len(wav) * 1000 / Synthesizer.sample_rate)
         fname = filename_formatter('{}_{}_{}ms_{}.wav'.format(fref, ftime, fms, ftext))
-        audio.save_wav(wav, _out_wav_dir.joinpath(fname), Synthesizer.sample_rate)  # save
+        audio.save_wav(wav, self._out_wav_dir.joinpath(fname), Synthesizer.sample_rate)  # save
 
         # Compute the embedding
         # TODO: this is problematic with different sampling rates, gotta fix it
@@ -280,7 +284,7 @@ class Toolbox:
         name = speaker_name + "_gen_%05d" % int(time.time())
         utterance = Utterance(name, speaker_name, wav, spec, embed, partial_embeds, True)
 
-        np.save(_out_embed_dir.joinpath(name + '.npy'), embed, allow_pickle=False)  # save
+        np.save(self._out_embed_dir.joinpath(name + '.npy'), embed, allow_pickle=False)  # save
 
         self.utterances.add(utterance)
 
