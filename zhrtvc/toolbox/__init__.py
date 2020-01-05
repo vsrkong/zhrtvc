@@ -28,18 +28,6 @@ recognized_datasets = [
 filename_formatter_re = re.compile(r'[\s\\/:*?"<>|\']+')
 filename_formatter = lambda x: filename_formatter_re.sub('_', x)[:100]
 
-eval_texts = """我家朵朵是世界上最漂亮的朵朵。
-知道自己是什么样的人
-要做什么
-无需活在别人非议或期待里
-你勤奋充电努力工作
-对人微笑
-是为了扮靓自己照亮自己的心
-告诉自己
-我是一股独立向上的力量
-一个人的自愈的能力越强
-才越有可能接近幸福""".split("\n")
-
 total_texts = xinqing_texts
 
 
