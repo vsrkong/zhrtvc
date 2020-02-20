@@ -1,10 +1,8 @@
 import os
 
-
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 import tensorflow as tf
-
 
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
@@ -14,7 +12,6 @@ from pathlib import Path
 from toolbox import Toolbox
 from utils.argutils import print_args
 import argparse
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(

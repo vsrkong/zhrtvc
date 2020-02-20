@@ -3,14 +3,13 @@ from vocoder.train import train
 from pathlib import Path
 import argparse
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Trains the vocoder from the synthesizer audios and the GTA synthesized mels, "
                     "or ground truth mels.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    
+
     parser.add_argument("run_id", type=str, help= \
         "Name for this model instance. If a model state from the same run ID was previously "
         "saved, the training will restart from there. Pass -f to overwrite saved states and "
@@ -24,7 +23,7 @@ if __name__ == "__main__":
     parser.add_argument("--voc_dir", type=str, default=argparse.SUPPRESS, help= \
         "Path to the vocoder directory that contains the GTA synthesized mel spectrograms. "
         "Defaults to <datasets_root>/SV2TTS/vocoder/. Unused if --ground_truth is passed.")
-    parser.add_argument("-m", "--models_dir", type=str, default="vocoder/saved_models/", help=\
+    parser.add_argument("-m", "--models_dir", type=str, default="vocoder/saved_models/", help= \
         "Path to the directory that will contain the saved model weights, as well as backups "
         "of those weights and wavs generated during training.")
     parser.add_argument("-g", "--ground_truth", action="store_true", help= \
@@ -53,4 +52,3 @@ if __name__ == "__main__":
     # Run the training
     print_args(args, parser)
     train(**vars(args))
-    

@@ -3,8 +3,6 @@ import shutil
 import collections as clt
 from pathlib import Path
 from tqdm import tqdm
-from pypinyin.style import convert
-from pypinyin.constants import PHRASES_DICT, PINYIN_DICT
 from pypinyin import lazy_pinyin
 from unidecode import unidecode
 import re
@@ -78,7 +76,7 @@ def run_create_json():
 
 def run_audio_strip():
     from pydub import AudioSegment
-    from pydub.silence import split_on_silence, detect_silence
+    from pydub.silence import detect_silence
     from pathlib import Path
     indir = Path(r'E:\lab\zhrtvc\zhrtvc\toolbox\saved_files\records')
     for num, inpath in enumerate(indir.glob('*')):
@@ -91,13 +89,13 @@ def run_audio_strip():
 
 
 def run_abspath_train_txt():
-    inpath = Path(r'F:\data\aishell\SV2TTS\synthesizer\train.txt')
-    outpath = Path(r'E:\data\train.txt')
+    inpath = Path(r'E:\data\aliaudio\SV2TTS\synthesizer\train.txt')
+    outpath = Path(r'E:\data\train_ali.txt')
     with inpath.open('r', encoding='utf8') as fin, outpath.open('a', encoding='utf8') as fout:
         for line in fin:
             # audio-000001_00.npy|mel-000001_00.npy|embed-000001_00.npy|42560|213|ka3 er3 pu3 pei2 wai4 sun1 wan2 hua2 ti1 .
             parts = line.strip('\n').split('|')
-            parts[0] = str(inpath.parent.joinpath('audio', parts[0])).replace('\\', '/')
+            # parts[0] = str(inpath.parent.joinpath('audio', parts[0])).replace('\\', '/')
             parts[1] = str(inpath.parent.joinpath('mels', parts[1])).replace('\\', '/')
             parts[2] = str(inpath.parent.joinpath('embeds', parts[2])).replace('\\', '/')
             out = '|'.join(parts)
@@ -109,7 +107,7 @@ def run_embed_sim():
     from tools.enc_analyzer import get_refs, get_speakers
     import collections as clt
     import numpy as np
-    from sklearn.metrics.pairwise import cosine_similarity, pairwise_distances
+    from sklearn.metrics.pairwise import pairwise_distances
     from matplotlib import pyplot as plt
     indir = Path(r'E:\data\stcmds\SV2TTS\synthesizer')
     inpath = indir.joinpath('train.txt')
@@ -178,8 +176,8 @@ def run_get_speakers():
 
 def run_mel_strip():
     import numpy as np
-    from tools.spec_processor import find_endpoint, find_silences
-    from synthesizer.audio import inv_mel_spectrogram, save_wav
+    from tools.spec_processor import find_silences
+    from synthesizer.utils.audio import inv_mel_spectrogram, save_wav
     from synthesizer.hparams import hparams
     from matplotlib import pyplot as plt
     inpath = Path(

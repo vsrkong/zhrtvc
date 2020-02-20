@@ -3,9 +3,10 @@ from tensorflow.contrib.training import HParams
 one = 64
 # Default hyperparameters
 hparams = HParams(
+    encoder_path=r"E:\lab\zhrtvc\logs\encoder\saved_models\pretrained.pt",
     # Comma-separated list of cleaners to run on text prior to training and eval. For non-English
     # text, you may want to use "basic_cleaners" or "transliteration_cleaners".
-    cleaners="english_cleaners",
+    cleaners="chinese_cleaners",
 
     # If you only have 1 GPU or want to use only one GPU, please set num_gpus=0 and specify the 
     # GPU idx on run. example:
@@ -89,6 +90,8 @@ hparams = HParams(
     # trim_top_db slowly. If samples are trimmed mid words, try increasing it.
     #	6- If audio quality is too metallic or fragmented (or if linear spectrogram plots are 
     # showing black silent regions on top), then restart from step 2.
+    inv_mel_basis=None,
+    mel_basis=None,
     num_mels=80,  # Number of mel-spectrogram channels and local conditioning dimensionality
     #  network
     rescale=True,  # Whether to rescale audio prior to preprocessing
@@ -241,7 +244,7 @@ hparams = HParams(
     # major slowdowns! Only use when critical!)
 
     # train/test split ratios, mini-batches sizes
-    tacotron_batch_size=32,  # number of training samples on each training steps (was 32)
+    tacotron_batch_size=64,  # number of training samples on each training steps (was 32)
     # Tacotron Batch synthesis supports ~16x the training batch size (no gradients during 
     # testing). 
     # Training Tacotron with unmasked paddings makes it aware of them, which makes synthesis times

@@ -1,5 +1,5 @@
 import tensorflow as tf
-from synthesizer.utils.symbols import symbols
+from synthesizer.utils.text import symbols
 from synthesizer.infolog import log
 from synthesizer.models.helpers import TacoTrainingHelper, TacoTestHelper
 from synthesizer.models.modules import *

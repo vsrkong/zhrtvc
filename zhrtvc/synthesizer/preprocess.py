@@ -1,6 +1,5 @@
 from multiprocessing.pool import Pool
-from synthesizer import audio
-from synthesizer.utils import cleaners
+from synthesizer.utils import audio
 from functools import partial
 from itertools import chain
 from encoder import inference as encoder
@@ -52,7 +51,7 @@ def preprocess_librispeech(datasets_root: Path, out_dir: Path, n_processes: int,
 
 
 def preprocess_user(datasets_root: Path, out_dir: Path, n_processes: int,
-                    skip_existing: bool, hparams):
+                    skip_existing: bool, hparams, datasets=None):
     """
     目录格式样例：
     datasets_root: E:\data\biaobei
@@ -72,8 +71,10 @@ def preprocess_user(datasets_root: Path, out_dir: Path, n_processes: int,
     :return:
     """
     # Gather the input directories
-    dataset_root = datasets_root.joinpath(datasets_root.name)  # datasets_root.name
-    input_dirs = [dataset_root]
+    if datasets is None:
+        input_dirs = [datasets_root]
+    else:
+        input_dirs = [datasets_root.joinpath(w) for w in datasets.split()]
     print("\n    ".join(map(str, ["Using data from:"] + input_dirs)))
     assert all(input_dir.exists() for input_dir in input_dirs)
 
@@ -81,20 +82,11 @@ def preprocess_user(datasets_root: Path, out_dir: Path, n_processes: int,
     out_dir.joinpath("mels").mkdir(exist_ok=True)
     out_dir.joinpath("audio").mkdir(exist_ok=True)
 
-    # Create a metadata file
+    for onedir in input_dirs:
+        preprocess_speaker_user(onedir, out_dir=out_dir, skip_existing=skip_existing, hparams=hparams,
+                                n_processes=n_processes)
+
     metadata_fpath = out_dir.joinpath("train.txt")
-    metadata_file = metadata_fpath.open("a" if skip_existing else "w", encoding="utf-8")
-
-    # Preprocess the dataset
-    # speaker_dirs = list(chain.from_iterable(input_dir.glob("*") for input_dir in input_dirs))
-    speaker_dirs = input_dirs
-    func = partial(preprocess_speaker_user, out_dir=out_dir, skip_existing=skip_existing, hparams=hparams)
-    job = Pool(n_processes).imap(func, speaker_dirs)
-    for speaker_metadata in tqdm(job, dataset_root.stem, len(speaker_dirs), unit="speakers"):
-        for metadatum in speaker_metadata:
-            metadata_file.write("|".join(str(x) for x in metadatum) + "\n")
-    metadata_file.close()
-
     # Verify the contents of the metadata file
     with metadata_fpath.open("r", encoding="utf-8") as metadata_file:
         metadata = [line.split("|") for line in metadata_file]
@@ -109,29 +101,45 @@ def preprocess_user(datasets_root: Path, out_dir: Path, n_processes: int,
     print("Max audio timesteps length: %d" % max(int(m[3]) for m in metadata))
 
 
-def preprocess_speaker_user(speaker_dir, out_dir: Path, skip_existing: bool, hparams):
+def preprocess_speaker_user(speaker_dir, out_dir: Path, skip_existing: bool, hparams, n_processes=None):
     alignments_fpath = speaker_dir.joinpath('metadata.csv')
     with alignments_fpath.open("r", encoding='utf8') as alignments_file:
         alignments = [line.rstrip().split('\t') for line in alignments_file]
 
-    metadata = []
-    # Iterate over each entry in the alignments file
-    for line in tqdm(alignments):
-        fname, text = line
-        wav_fpath = speaker_dir.joinpath('wavs', fname + ".wav")
-        assert wav_fpath.exists()
-        # words = words.replace("\"", "").split(",")
-        # end_times = list(map(float, end_times.replace("\"", "").split(",")))
-        end_times = None
-        # Process each sub-utterance
-        wavs, texts = split_on_silences(wav_fpath, text, end_times, hparams)
-        for i, (wav, text) in enumerate(zip(wavs, texts)):
-            fname = fname.replace('/', '-')
-            sub_basename = "%s_%02d" % (fname, i)
-            metadata.append(process_utterance(wav, text, out_dir, sub_basename,
-                                              skip_existing, hparams))
+    # Create a metadata file
+    metadata_fpath = out_dir.joinpath("train.txt")
+    metadata_file = metadata_fpath.open("a" if skip_existing else "w", encoding="utf-8")
 
-    return [m for m in metadata if m is not None]
+    if n_processes == 0:
+        for line in tqdm(alignments, speaker_dir.stem, unit="it"):
+            one_metadata = preprocess_utterance_user(
+                line, speaker_dir=speaker_dir, out_dir=out_dir, skip_existing=skip_existing, hparams=hparams)
+            if one_metadata:
+                metadata_file.write("|".join(str(x) for x in one_metadata) + "\n")
+    else:
+        func = partial(preprocess_utterance_user, speaker_dir=speaker_dir, out_dir=out_dir, skip_existing=skip_existing,
+                       hparams=hparams)
+        job = Pool(n_processes).imap(func, alignments)
+
+        for one_metadata in tqdm(job, speaker_dir.stem, len(alignments), unit="it"):
+            if one_metadata:
+                metadata_file.write("|".join(str(x) for x in one_metadata) + "\n")
+
+    metadata_file.close()
+
+
+def preprocess_utterance_user(line, speaker_dir, out_dir: Path, skip_existing: bool, hparams):
+    fname, text = line
+    wav_fpath = speaker_dir.joinpath('wavs', fname + ".wav")
+    try:
+        assert wav_fpath.exists()
+        fname = fname.replace('/', '-')
+        one_metadata = process_utterance(wav_fpath, text, out_dir, fname, skip_existing, hparams)
+    except Exception as e:
+        print(line)
+        print(e)
+        return None
+    return one_metadata
 
 
 def preprocess_speaker(speaker_dir, out_dir: Path, skip_existing: bool, hparams):
@@ -169,7 +177,8 @@ def split_on_silences(wav_fpath, words, end_times, hparams):
     wav, _ = librosa.load(wav_fpath, hparams.sample_rate)
     if hparams.rescale:
         wav = wav / np.abs(wav).max() * hparams.rescaling_max
-    text = cleaners.english_cleaners(''.join(words))
+
+    text = ''.join(words)
     return [wav], [text]
     words = np.array(words)
     start_times = np.array([0.0] + end_times[:-1])
@@ -219,25 +228,10 @@ def split_on_silences(wav_fpath, words, end_times, hparams):
     segment_times = (np.array(segment_times) * hparams.sample_rate).astype(np.int)
     wavs = [wav[segment_time[0]:segment_time[1]] for segment_time in segment_times]
     texts = [" ".join(words[start + 1:end]).replace("  ", " ") for start, end in segments]
-
-    # # DEBUG: play the audio segments (run with -n=1)
-    # import sounddevice as sd
-    # if len(wavs) > 1:
-    #     print("This sentence was split in %d segments:" % len(wavs))
-    # else:
-    #     print("There are no silences long enough for this sentence to be split:")
-    # for wav, text in zip(wavs, texts):
-    #     # Pad the waveform with 1 second of silence because sounddevice tends to cut them early
-    #     # when playing them. You shouldn't need to do that in your parsers.
-    #     wav = np.concatenate((wav, [0] * 16000))
-    #     print("\t%s" % text)
-    #     sd.play(wav, 16000, blocking=True)
-    # print("")
-
     return wavs, texts
 
 
-def process_utterance(wav: np.ndarray, text: str, out_dir: Path, basename: str,
+def process_utterance(wav_fpath: np.ndarray, text: str, out_dir: Path, basename: str,
                       skip_existing: bool, hparams):
     ## FOR REFERENCE:
     # For you not to lose your head if you ever wish to change things here or implement your own
@@ -253,9 +247,13 @@ def process_utterance(wav: np.ndarray, text: str, out_dir: Path, basename: str,
 
     # Skip existing utterances if needed
     mel_fpath = out_dir.joinpath("mels", "mel-%s.npy" % basename)
-    wav_fpath = out_dir.joinpath("audio", "audio-%s.npy" % basename)
-    if skip_existing and mel_fpath.exists() and wav_fpath.exists():
+    # wav_fpath = out_dir.joinpath("audio", "audio-%s.npy" % basename)
+    if skip_existing and mel_fpath.exists():  # and wav_fpath.exists():
         return None
+
+    wav, _ = librosa.load(wav_fpath, hparams.sample_rate)
+    if hparams.rescale:
+        wav = wav / np.abs(wav).max() * hparams.rescaling_max
 
     # Skip utterances that are too short
     if len(wav) < hparams.utterance_min_duration * hparams.sample_rate:
@@ -271,13 +269,13 @@ def process_utterance(wav: np.ndarray, text: str, out_dir: Path, basename: str,
 
     # Write the spectrogram, embed and audio to disk
     np.save(mel_fpath, mel_spectrogram.T, allow_pickle=False)
-    np.save(wav_fpath, wav, allow_pickle=False)
+    # np.save(wav_fpath, wav, allow_pickle=False)
 
     # Return a tuple describing this training example
-    return wav_fpath.name, mel_fpath.name, "embed-%s.npy" % basename, len(wav), mel_frames, text
+    return str(wav_fpath).replace("\\", "/"), mel_fpath.name, "embed-%s.npy" % basename, len(wav), mel_frames, text
 
 
-def embed_utterance(fpaths, encoder_model_fpath):
+def embed_utterance(fpaths, encoder_model_fpath, hparams):
     if not encoder.is_loaded():
         encoder.load_model(encoder_model_fpath)
 
@@ -285,13 +283,17 @@ def embed_utterance(fpaths, encoder_model_fpath):
     wav_fpath, embed_fpath = fpaths
     if embed_fpath.exists():
         return
-    wav = np.load(wav_fpath)
+    # wav = np.load(wav_fpath)
+    wav, _ = librosa.load(wav_fpath, hparams.sample_rate)
+    if hparams.rescale:
+        wav = wav / np.abs(wav).max() * hparams.rescaling_max
+
     wav = encoder.preprocess_wav(wav)
     embed = encoder.embed_utterance(wav)
     np.save(embed_fpath, embed, allow_pickle=False)
 
 
-def create_embeddings(synthesizer_root: Path, encoder_model_fpath: Path, n_processes: int):
+def create_embeddings(synthesizer_root: Path, encoder_model_fpath: Path, n_processes: int, hparams):
     wav_dir = synthesizer_root.joinpath("audio")
     metadata_fpath = synthesizer_root.joinpath("train.txt")
     assert wav_dir.exists() and metadata_fpath.exists()
@@ -299,12 +301,16 @@ def create_embeddings(synthesizer_root: Path, encoder_model_fpath: Path, n_proce
     embed_dir.mkdir(exist_ok=True)
 
     # Gather the input wave filepath and the target output embed filepath
-    with metadata_fpath.open("r") as metadata_file:
+    with metadata_fpath.open("r", encoding="utf8") as metadata_file:
         metadata = [line.split("|") for line in metadata_file]
-        fpaths = [(wav_dir.joinpath(m[0]), embed_dir.joinpath(m[2])) for m in metadata]
+        fpaths = [(m[0], embed_dir.joinpath(m[2])) for m in metadata]
 
     # TODO: improve on the multiprocessing, it's terrible. Disk I/O is the bottleneck here.
     # Embed the utterances in separate threads
-    func = partial(embed_utterance, encoder_model_fpath=encoder_model_fpath)
-    job = Pool(n_processes).imap(func, fpaths)
-    list(tqdm(job, "Embedding", len(fpaths), unit="utterances"))
+    if n_processes == 0:
+        for fpath in tqdm(fpaths):
+            embed_utterance(fpath, encoder_model_fpath=encoder_model_fpath, hparams=hparams)
+    else:
+        func = partial(embed_utterance, encoder_model_fpath=encoder_model_fpath, hparams=hparams)
+        job = Pool(n_processes).imap(func, fpaths)
+        list(tqdm(job, "Embedding", len(fpaths), unit="utterances"))

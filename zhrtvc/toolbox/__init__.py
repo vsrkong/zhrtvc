@@ -10,12 +10,15 @@ import traceback
 import sys
 import re
 import time
-from synthesizer import audio, hparams
+from synthesizer.utils import audio
+from synthesizer.utils.text import text2pinyin, change_diao
+# from synthesizer.utils.cleaners import get_pinyin
 from tools.spec_processor import find_start_end_points
 from .sentence import xinqing_texts
 
 # Use this directory structure for your datasets, or modify it to fit your needs
 recognized_datasets = [
+    r'aliaudio\samples',
     r'stcmds\stcmds\wavs',
     r"aishell\aishell\wavs",
     r"xunfei",
@@ -27,6 +30,18 @@ recognized_datasets = [
 
 filename_formatter_re = re.compile(r'[\s\\/:*?"<>|\']+')
 filename_formatter = lambda x: filename_formatter_re.sub('_', x)[:100]
+
+eval_texts = """我家朵朵是世界上最漂亮的朵朵。
+知道自己是什么样的人
+要做什么
+无需活在别人非议或期待里
+你勤奋充电努力工作
+对人微笑
+是为了扮靓自己照亮自己的心
+告诉自己
+我是一股独立向上的力量
+一个人的自愈的能力越强
+才越有可能接近幸福""".split("\n")
 
 total_texts = xinqing_texts
 
@@ -194,7 +209,12 @@ class Toolbox:
         if not self.synthesizer.is_loaded():
             self.ui.log("Loading the synthesizer %s" % self.synthesizer.checkpoint_fpath)
 
-        texts = self.ui.text_prompt.toPlainText().split("\n")
+        ptext = self.ui.text_prompt.toPlainText()
+        # if ptext.startswith("py"):  # 适用于sync2，适应训练时候用pinyin+chinese_cleaners的bug
+        #     ptext = get_pinyin(ptext[2:])  # 把chinese_cleaners的lowercase用起来，否则不能合成。
+        ptext = " ".join(text2pinyin(ptext))
+        texts = ptext.split("\n")
+        print(dict(texts=texts))
         embed = self.ui.selected_utterance.embed
         embeds = np.stack([embed] * len(texts))
         specs = self.synthesizer.synthesize_spectrograms(texts, embeds)

@@ -4,7 +4,6 @@ from utils.argutils import print_args
 from pathlib import Path
 import argparse
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Preprocesses audio files from datasets, encodes them as mel spectrograms "
@@ -12,20 +11,22 @@ if __name__ == "__main__":
                     "vocoder for training.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument("--datasets_root", type=Path, default=Path(r'F:\data\aishell'), help=\
+    parser.add_argument("--datasets_root", type=Path, default=Path(r'E:\data\aliaudio'), help= \
         "Path to the directory containing your LibriSpeech/TTS datasets.")
-    parser.add_argument("-o", "--out_dir", type=Path, default=argparse.SUPPRESS, help=\
+    parser.add_argument("--datasets", type=str, default="alipinyin", help= \
+        "Path to the directory containing your LibriSpeech/TTS datasets.")
+    parser.add_argument("-o", "--out_dir", type=Path, default=argparse.SUPPRESS, help= \
         "Path to the output directory that will contain the mel spectrograms, the audios and the "
         "embeds. Defaults to <datasets_root>/SV2TTS/synthesizer/")
-    parser.add_argument("-n", "--n_processes", type=int, default=None, help=\
+    parser.add_argument("-n", "--n_processes", type=int, default=0, help= \
         "Number of processes in parallel.")
-    parser.add_argument("-s", "--skip_existing", action="store_true", help=\
+    parser.add_argument("-s", "--skip_existing", type=bool, default=True, help= \
         "Whether to overwrite existing files with the same name. Useful if the preprocessing was "
         "interrupted.")
-    parser.add_argument("--hparams", type=str, default="", help=\
+    parser.add_argument("--hparams", type=str, default="", help= \
         "Hyperparameter overrides as a comma-separated list of name-value pairs")
     args = parser.parse_args()
-    
+
     # Process the arguments
     if not hasattr(args, "out_dir"):
         args.out_dir = args.datasets_root.joinpath("SV2TTS", "synthesizer")

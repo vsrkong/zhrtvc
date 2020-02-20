@@ -191,6 +191,5 @@ xinqing_texts = """生活岂能百般如意
 记住快乐的事
 忘记令你悲伤的事""".split("\n")
 
-
 if __name__ == "__main__":
     print(__file__)

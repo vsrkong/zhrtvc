@@ -1,10 +1,11 @@
-from synthesizer.utils.symbols import symbols
+from synthesizer.utils.text import symbols
 from synthesizer.utils.text import sequence_to_text
 from synthesizer.hparams import hparams_debug_string
 from synthesizer.feeder import Feeder
 from synthesizer.models import create_model
-from synthesizer.utils import ValueWindow, plot
-from synthesizer import infolog, audio
+from synthesizer.utils import ValueWindow, plot, audio
+from synthesizer import infolog
+from utils.argutils import args2dict
 from datetime import datetime
 from tqdm import tqdm
 import tensorflow as tf
@@ -12,6 +13,7 @@ import numpy as np
 import traceback
 import time
 import os
+import json
 
 log = infolog.log
 
@@ -20,14 +22,14 @@ def add_embedding_stats(summary_writer, embedding_names, paths_to_meta, checkpoi
     # Create tensorboard projector
     config = tf.contrib.tensorboard.plugins.projector.ProjectorConfig()
     config.model_checkpoint_path = checkpoint_path
-    
+
     for embedding_name, path_to_meta in zip(embedding_names, paths_to_meta):
         # Initialize config
         embedding = config.embeddings.add()
         # Specifiy the embedding variable and the metadata
         embedding.tensor_name = embedding_name
         embedding.metadata_path = path_to_meta
-    
+
     # Project the embeddings to space dimensions for visualization
     tf.contrib.tensorboard.plugins.projector.visualize_embeddings(summary_writer, config)
 
@@ -39,13 +41,13 @@ def add_train_stats(model, hparams):
             tf.summary.histogram("mel_targets %d" % i, model.tower_mel_targets[i])
         tf.summary.scalar("before_loss", model.before_loss)
         tf.summary.scalar("after_loss", model.after_loss)
-        
+
         if hparams.predict_linear:
             tf.summary.scalar("linear_loss", model.linear_loss)
             for i in range(hparams.tacotron_num_gpus):
                 tf.summary.histogram("mel_outputs %d" % i, model.tower_linear_outputs[i])
                 tf.summary.histogram("mel_targets %d" % i, model.tower_linear_targets[i])
-        
+
         tf.summary.scalar("regularization_loss", model.regularization_loss)
         tf.summary.scalar("stop_token_loss", model.stop_token_loss)
         tf.summary.scalar("loss", model.loss)
@@ -85,7 +87,7 @@ def time_string():
 def model_train_mode(args, feeder, hparams, global_step):
     with tf.variable_scope("Tacotron_model", reuse=tf.AUTO_REUSE) as scope:
         model = create_model("Tacotron", hparams)
-        model.initialize(feeder.inputs, feeder.input_lengths, feeder.speaker_embeddings, 
+        model.initialize(feeder.inputs, feeder.input_lengths, feeder.speaker_embeddings,
                          feeder.mel_targets, feeder.token_targets,
                          targets_lengths=feeder.targets_lengths, global_step=global_step,
                          is_training=True, split_infos=feeder.split_infos)
@@ -98,24 +100,30 @@ def model_train_mode(args, feeder, hparams, global_step):
 def model_test_mode(args, feeder, hparams, global_step):
     with tf.variable_scope("Tacotron_model", reuse=tf.AUTO_REUSE) as scope:
         model = create_model("Tacotron", hparams)
-        model.initialize(feeder.eval_inputs, feeder.eval_input_lengths, 
+        model.initialize(feeder.eval_inputs, feeder.eval_input_lengths,
                          feeder.eval_speaker_embeddings, feeder.eval_mel_targets,
-                         feeder.eval_token_targets, targets_lengths=feeder.eval_targets_lengths, 
+                         feeder.eval_token_targets, targets_lengths=feeder.eval_targets_lengths,
                          global_step=global_step, is_training=False, is_evaluating=True,
                          split_infos=feeder.eval_split_infos)
         model.add_loss()
         return model
 
 
+def json_dump(obj, path):
+    if os.path.isfile(path):
+        path = "{}_{}.json".format(os.path.splitext(path)[0], time.strftime("%Y%y%d-%H%M%S"))
+    json.dump(obj, open(path, "wt", encoding="utf8"), indent=4, ensure_ascii=False)
+
+
 def train(log_dir, args, hparams):
-    save_dir = os.path.join(log_dir, "taco_pretrained")
+    save_dir = os.path.join(log_dir, "checkpoints")
     plot_dir = os.path.join(log_dir, "plots")
     wav_dir = os.path.join(log_dir, "wavs")
-    mel_dir = os.path.join(log_dir, "mel-spectrograms")
-    eval_dir = os.path.join(log_dir, "eval-dir")
+    mel_dir = os.path.join(log_dir, "spectrograms")
+    eval_dir = os.path.join(log_dir, "evals")
     eval_plot_dir = os.path.join(eval_dir, "plots")
     eval_wav_dir = os.path.join(eval_dir, "wavs")
-    tensorboard_dir = os.path.join(log_dir, "tacotron_events")
+    tensorboard_dir = os.path.join(log_dir, "events")
     meta_folder = os.path.join(log_dir, "metas")
     os.makedirs(save_dir, exist_ok=True)
     os.makedirs(plot_dir, exist_ok=True)
@@ -126,28 +134,28 @@ def train(log_dir, args, hparams):
     os.makedirs(eval_wav_dir, exist_ok=True)
     os.makedirs(tensorboard_dir, exist_ok=True)
     os.makedirs(meta_folder, exist_ok=True)
-    
-    checkpoint_fpath = os.path.join(save_dir, "tacotron_model.ckpt")
+
+    checkpoint_fpath = os.path.join(save_dir, "model.ckpt")
     metadat_fpath = os.path.join(args.synthesizer_root, "train.txt")
-    
+
     log("Checkpoint path: {}".format(checkpoint_fpath))
     log("Loading training data from: {}".format(metadat_fpath))
     log("Using model: Tacotron")
     log(hparams_debug_string())
-    
+
     # Start by setting a seed for repeatability
     tf.set_random_seed(hparams.tacotron_random_seed)
-    
+
     # Set up data feeder
     coord = tf.train.Coordinator()
     with tf.variable_scope("datafeeder") as scope:
         feeder = Feeder(coord, metadat_fpath, hparams)
-    
+
     # Set up model:
     global_step = tf.Variable(0, name="global_step", trainable=False)
     model, stats = model_train_mode(args, feeder, hparams, global_step)
     eval_model = model_test_mode(args, feeder, hparams, global_step)
-    
+
     # Embeddings metadata
     char_embedding_meta = os.path.join(meta_folder, "CharacterEmbeddings.tsv")
     if not os.path.isfile(char_embedding_meta):
@@ -155,52 +163,63 @@ def train(log_dir, args, hparams):
             for symbol in symbols:
                 if symbol == " ":
                     symbol = "\\s"  # For visual purposes, swap space with \s
-                
+
                 f.write("{}\n".format(symbol))
-    
     char_embedding_meta = char_embedding_meta.replace(log_dir, "..")
-    
+
+    path = os.path.join(meta_folder, "symbols.json")
+    obj = symbols
+    json_dump(obj, path)
+
+    path = os.path.join(meta_folder, "args.json")
+    obj = args2dict(args)
+    json_dump(obj, path)
+
+    path = os.path.join(meta_folder, "hparams.json")
+    obj = hparams.values()
+    json_dump(obj, path)
+
     # Book keeping
     step = 0
     time_window = ValueWindow(100)
     loss_window = ValueWindow(100)
     saver = tf.train.Saver(max_to_keep=5)
-    
+
     log("Tacotron training set to a maximum of {} steps".format(args.tacotron_train_steps))
-    
+
     # Memory allocation on the GPU as needed
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     config.allow_soft_placement = True
-    
+
     # Train
     with tf.Session(config=config) as sess:
         try:
             summary_writer = tf.summary.FileWriter(tensorboard_dir, sess.graph)
-            
+
             sess.run(tf.global_variables_initializer())
-            
+
             # saved model restoring
             if args.restore:
                 # Restore saved model if the user requested it, default = True
                 try:
                     checkpoint_state = tf.train.get_checkpoint_state(save_dir)
-                    
+
                     if checkpoint_state and checkpoint_state.model_checkpoint_path:
                         log("Loading checkpoint {}".format(checkpoint_state.model_checkpoint_path),
                             slack=True)
                         saver.restore(sess, checkpoint_state.model_checkpoint_path)
-                    
+
                     else:
                         log("No model to load at {}".format(save_dir), slack=True)
                         saver.save(sess, checkpoint_fpath, global_step=global_step)
-                
+
                 except tf.errors.OutOfRangeError as e:
                     log("Cannot restore checkpoint: {}".format(e), slack=True)
             else:
                 log("Starting new training!", slack=True)
                 saver.save(sess, checkpoint_fpath, global_step=global_step)
-            
+
             # initializing feeder
             feeder.start_threads(sess)
             init_step, init_loss, init_opt = sess.run([global_step, model.loss, model.optimize])
@@ -214,11 +233,11 @@ def train(log_dir, args, hparams):
                 message = "Step {:7d} [{:.3f} sec/step, loss={:.5f}, avg_loss={:.5f}]".format(
                     step, time_window.average, loss, loss_window.average)
                 print(message)
-                
+
                 if loss > 100 or np.isnan(loss):
                     log("Loss exploded to {:.5f} at step {}".format(loss, step))
                     raise Exception("Loss exploded")
-                
+
                 if step % args.summary_interval == 0 or step == init_step + 100:
                     log("\nWriting summary at step {}".format(step))
                     summary_writer.add_summary(sess.run(stats), step)
@@ -227,18 +246,18 @@ def train(log_dir, args, hparams):
                 if step % args.eval_interval == 0 or step == init_step + 100:
                     # Run eval and save eval stats
                     log("\nRunning evaluation at step {}".format(step))
-                    
+
                     eval_losses = []
                     before_losses = []
                     after_losses = []
                     stop_token_losses = []
                     linear_losses = []
                     linear_loss = None
-                    
+
                     if hparams.predict_linear:
                         for i in tqdm(range(feeder.test_steps)):
                             eloss, before_loss, after_loss, stop_token_loss, linear_loss, mel_p, \
-							mel_t, t_len, align, lin_p, lin_t = sess.run(
+                            mel_t, t_len, align, lin_p, lin_t = sess.run(
                                 [
                                     eval_model.tower_loss[0], eval_model.tower_before_loss[0],
                                     eval_model.tower_after_loss[0],
@@ -257,16 +276,16 @@ def train(log_dir, args, hparams):
                             stop_token_losses.append(stop_token_loss)
                             linear_losses.append(linear_loss)
                         linear_loss = sum(linear_losses) / len(linear_losses)
-                        
+
                         wav = audio.inv_linear_spectrogram(lin_p.T, hparams)
                         audio.save_wav(wav, os.path.join(eval_wav_dir,
                                                          "step-{}-eval-wave-from-linear.wav".format(
                                                              step)), sr=hparams.sample_rate)
-                    
+
                     else:
                         for i in tqdm(range(feeder.test_steps)):
-                            eloss, before_loss, after_loss, stop_token_loss, mel_p, mel_t, t_len,\
-							align = sess.run(
+                            eloss, before_loss, after_loss, stop_token_loss, mel_p, mel_t, t_len, \
+                            align = sess.run(
                                 [
                                     eval_model.tower_loss[0], eval_model.tower_before_loss[0],
                                     eval_model.tower_after_loss[0],
@@ -280,19 +299,19 @@ def train(log_dir, args, hparams):
                             before_losses.append(before_loss)
                             after_losses.append(after_loss)
                             stop_token_losses.append(stop_token_loss)
-                    
+
                     eval_loss = sum(eval_losses) / len(eval_losses)
                     before_loss = sum(before_losses) / len(before_losses)
                     after_loss = sum(after_losses) / len(after_losses)
                     stop_token_loss = sum(stop_token_losses) / len(stop_token_losses)
-                    
+
                     log("Saving eval log to {}..".format(eval_dir))
                     # Save some log to monitor model improvement on same unseen sequence
                     wav = audio.inv_mel_spectrogram(mel_p.T, hparams)
                     audio.save_wav(wav, os.path.join(eval_wav_dir,
                                                      "step-{}-eval-wave-from-mel.wav".format(step)),
                                    sr=hparams.sample_rate)
-                    
+
                     plot.plot_alignment(align, os.path.join(eval_plot_dir,
                                                             "step-{}-eval-align.png".format(step)),
                                         title="{}, {}, step={}, loss={:.5f}".format("Tacotron",
@@ -301,8 +320,7 @@ def train(log_dir, args, hparams):
                                                                                     eval_loss),
                                         max_len=t_len // hparams.outputs_per_step)
                     plot.plot_spectrogram(mel_p, os.path.join(eval_plot_dir,
-                                                              "step-{"
-															  "}-eval-mel-spectrogram.png".format(
+                                                              "step-{}-eval-mel-spectrogram.png".format(
                                                                   step)),
                                           title="{}, {}, step={}, loss={:.5f}".format("Tacotron",
                                                                                       time_string(),
@@ -310,7 +328,7 @@ def train(log_dir, args, hparams):
                                                                                       eval_loss),
                                           target_spectrogram=mel_t,
                                           max_len=t_len)
-                    
+
                     if hparams.predict_linear:
                         plot.plot_spectrogram(lin_p, os.path.join(eval_plot_dir,
                                                                   "step-{}-eval-linear-spectrogram.png".format(
@@ -319,16 +337,16 @@ def train(log_dir, args, hparams):
                                                   "Tacotron", time_string(), step, eval_loss),
                                               target_spectrogram=lin_t,
                                               max_len=t_len, auto_aspect=True)
-                    
+
                     log("Eval loss for global step {}: {:.3f}".format(step, eval_loss))
                     log("Writing eval summary!")
                     add_eval_stats(summary_writer, step, linear_loss, before_loss, after_loss,
                                    stop_token_loss, eval_loss)
-                
+
                 if step % args.checkpoint_interval == 0 or step == args.tacotron_train_steps or step == init_step + 100:
                     # Save model and current global step
                     saver.save(sess, checkpoint_fpath, global_step=global_step)
-                    
+
                     log("\nSaving alignment, Mel-Spectrograms and griffin-lim inverted waveform..")
                     input_seq, mel_prediction, alignment, target, target_length = sess.run([
                         model.tower_inputs[0][0],
@@ -337,18 +355,18 @@ def train(log_dir, args, hparams):
                         model.tower_mel_targets[0][0],
                         model.tower_targets_lengths[0][0],
                     ])
-                    
+
                     # save predicted mel spectrogram to disk (debug)
                     mel_filename = "mel-prediction-step-{}.npy".format(step)
                     np.save(os.path.join(mel_dir, mel_filename), mel_prediction.T,
                             allow_pickle=False)
-                    
+
                     # save griffin lim inverted wav for debug (mel -> wav)
                     wav = audio.inv_mel_spectrogram(mel_prediction.T, hparams)
                     audio.save_wav(wav,
                                    os.path.join(wav_dir, "step-{}-wave-from-mel.wav".format(step)),
                                    sr=hparams.sample_rate)
-                    
+
                     # save alignment plot to disk (control purposes)
                     plot.plot_alignment(alignment,
                                         os.path.join(plot_dir, "step-{}-align.png".format(step)),
@@ -366,22 +384,22 @@ def train(log_dir, args, hparams):
                                           target_spectrogram=target,
                                           max_len=target_length)
                     log("Input at step {}: {}".format(step, sequence_to_text(input_seq)))
-                
+
                 if step % args.embedding_interval == 0 or step == args.tacotron_train_steps or step == init_step + 100:
                     # Get current checkpoint state
                     checkpoint_state = tf.train.get_checkpoint_state(save_dir)
-                    
+
                     # Update Projector
                     log("\nSaving Model Character Embeddings visualization..")
                     add_embedding_stats(summary_writer, [model.embedding_table.name],
                                         [char_embedding_meta],
                                         checkpoint_state.model_checkpoint_path)
                     log("Tacotron Character embeddings have been updated on tensorboard!")
-            
+
             log("Tacotron training complete after {} global steps!".format(
                 args.tacotron_train_steps), slack=True)
             return save_dir
-        
+
         except Exception as e:
             log("Exiting due to exception: {}".format(e), slack=True)
             traceback.print_exc()

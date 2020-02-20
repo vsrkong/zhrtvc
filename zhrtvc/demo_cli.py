@@ -11,15 +11,14 @@ sess = tf.Session(config=config)
 from encoder.params_model import model_embedding_size as speaker_embedding_size
 from utils.argutils import print_args
 from synthesizer.inference import Synthesizer
-from synthesizer import audio, hparams
+from synthesizer import hparams
+from synthesizer.utils import audio
 from encoder import inference as encoder
 # from vocoder import inference as vocoder
 from pathlib import Path
 import numpy as np
 import librosa
 import argparse
-import torch
-import sys
 import time
 
 _out_dir = Path('data', 'syns')

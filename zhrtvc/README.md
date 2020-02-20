@@ -22,13 +22,6 @@
     - 合成的语音去除噪声。
     - 合成的语音不好，频谱平滑，原因是训练语料有背景噪声，噪声表现在频谱上为随机散点，模型则只能学习到平滑的效果。
 
-7. 中文环境的音素。
-    - 用音素，清华大学的音素标准，声母、韵母、声调分离。
-    - 用拼音当做音素，拼音和声调分离。
-
-8. 训练synthesizer的时候实时生成embed。
-9. 训练分block进行，利用每个block的缓存加快训练速度。
-
 # Real-Time Voice Cloning
 This repository is an implementation of [Transfer Learning from Speaker Verification to
 Multispeaker Text-To-Speech Synthesis](https://arxiv.org/pdf/1806.04558.pdf) (SV2TTS) with a vocoder that works in real-time. Feel free to check [my thesis](https://matheo.uliege.be/handle/2268.2/6801) if you're curious or if you're looking for info I haven't documented yet (don't hesitate to make an issue for that too). Mostly I would recommend giving a quick look to the figures beyond the introduction.
