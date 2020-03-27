@@ -1,0 +1,16 @@
+README.md
+setup.py
+phkit/__init__.py
+phkit/cmudict.py
+phkit/convert.py
+phkit/english_cleaner.py
+phkit/number.py
+phkit/phoneme.py
+phkit/pinyin.py
+phkit/sequence.py
+phkit/symbol.py
+phkit.egg-info/PKG-INFO
+phkit.egg-info/SOURCES.txt
+phkit.egg-info/dependency_links.txt
+phkit.egg-info/requires.txt
+phkit.egg-info/top_level.txt
